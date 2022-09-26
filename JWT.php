@@ -11,41 +11,13 @@
 class JWT
 {
     /**
-     * @param string      $jwt    The JWT
-     * @param string|null $key    The secret key
-     * @param bool        $verify Don't skip verification process 
-     *
-     * @return object The JWT's payload as a PHP object
-     */
-    public static function decode($jwt, $key = null, $verify = true)
-    {
-        $tks = explode('.', $jwt);
-        if (count($tks) != 3) {
-            throw new UnexpectedValueException('Wrong number of segments');
-        }
-        list($headb64, $payloadb64, $cryptob64) = $tks;
-        if (null === ($header = JWT::jsonDecode(JWT::urlsafeB64Decode($headb64)))
-        ) {
-            throw new UnexpectedValueException('Invalid segment encoding');
-        }
-        if (null === $payload = JWT::jsonDecode(JWT::urlsafeB64Decode($payloadb64))
-        ) {
-            throw new UnexpectedValueException('Invalid segment encoding');
-        }
-        $sig = JWT::urlsafeB64Decode($cryptob64);
-        if ($verify) {
-            if (empty($header->alg)) {
-                throw new DomainException('Empty algorithm');
-            }
-            if ($sig != JWT::sign("$headb64.$payloadb64", $key, $header->alg)) {
-                throw new UnexpectedValueException('Signature verification failed');
-            }
-        }
-        return $payload;
-    }
-
-    /**
      * @param object|array $payload PHP object or array
+     * [
+     *  'iss'=>'admin',  //签发者
+     *  'iat'=>time(),  //签发时间 issued at date
+     *  'exp'=>time()+7200,  //过期时间 expiration date
+     *  'nbf'=>time()+60,  //该时间之前不接收处理该Token not before date
+     * ]
      * @param string       $key     The secret key
      * @param string       $algo    The signing algorithm
      *
@@ -64,6 +36,47 @@ class JWT
         $segments[] = JWT::urlsafeB64Encode($signature);
 
         return implode('.', $segments);
+    }
+
+    /**
+     * @param string      $jwt    The JWT
+     * @param string|null $key    The secret key
+     *
+     * @return array The JWT's payload as a PHP array
+     */
+    public static function decode($jwt, $key = null)
+    {
+        $tks = explode('.', $jwt);
+        if (count($tks) != 3) {
+            throw new UnexpectedValueException('Wrong number of segments', 1);
+        }
+        list($headb64, $payloadb64, $cryptob64) = $tks;
+        if (null === ($header = JWT::jsonDecode(JWT::urlsafeB64Decode($headb64)))) {
+            throw new UnexpectedValueException('Invalid segment encoding', 1);
+        }
+        if (null === ($payload = JWT::jsonDecode(JWT::urlsafeB64Decode($payloadb64)))) {
+            throw new UnexpectedValueException('Invalid segment encoding', 1);
+        }
+        $sig = JWT::urlsafeB64Decode($cryptob64);
+        if (empty($header['alg'])) {
+            throw new DomainException('Empty algorithm', 1);
+        }
+        if ($sig != JWT::sign("$headb64.$payloadb64", $key, $header['alg'])) {
+            throw new UnexpectedValueException('Signature verification failed', 2);
+        }
+        // 签发时间大于当前服务器时间验证失败
+        if (isset($payload['iat']) && $payload['iat'] > time()) {
+            throw new UnexpectedValueException('Token iat is not valid before: ' . date(DateTime::ISO8601, $payload['iat']), 3);
+        }
+        // 过期时间小宇当前服务器时间验证失败
+        if (isset($payload['exp']) && $payload['exp'] < time()) {
+            throw new UnexpectedValueException('Token exp is not valid since: ' . date(DateTime::ISO8601, $payload['exp']), 4);
+        }
+        // 该nbf时间之前不接收处理该Token
+        if (isset($payload['nbf']) && $payload['nbf'] > time()) {
+            throw new UnexpectedValueException('Token nbf is not valid before: ' . date(DateTime::ISO8601, $payload['nbf']), 5);
+        }
+        return $payload;
     }
 
     /**
@@ -93,11 +106,10 @@ class JWT
      */
     public static function jsonDecode($input)
     {
-        $obj = json_decode($input);
+        $obj = json_decode($input, true);
         if (function_exists('json_last_error') && $errno = json_last_error()) {
             JWT::handleJsonError($errno);
-        }
-        else if ($obj === null && $input !== 'null') {
+        } else if ($obj === null && $input !== 'null') {
             throw new DomainException('Null result with non-null input');
         }
         return $obj;
@@ -110,11 +122,10 @@ class JWT
      */
     public static function jsonEncode($input)
     {
-        $json = json_encode($input);
+        $json = json_encode($input, JSON_UNESCAPED_UNICODE);
         if (function_exists('json_last_error') && $errno = json_last_error()) {
             JWT::handleJsonError($errno);
-        }
-        else if ($json === 'null' && $input !== null) {
+        } else if ($json === 'null' && $input !== null) {
             throw new DomainException('Null result with non-null input');
         }
         return $json;
@@ -157,11 +168,10 @@ class JWT
             JSON_ERROR_CTRL_CHAR => 'Unexpected control character found',
             JSON_ERROR_SYNTAX => 'Syntax error, malformed JSON'
         );
-        throw new DomainException(isset($messages[$errno])
-            ? $messages[$errno]
-            : 'Unknown JSON error: ' . $errno
+        throw new DomainException(
+            isset($messages[$errno])
+                ? $messages[$errno]
+                : 'Unknown JSON error: ' . $errno
         );
     }
-
 }
-
