@@ -1,5 +1,9 @@
 <?php
 
+use DateTime;
+use DomainException;
+use UnexpectedValueException;
+
 /**
  * JSON Web Token implementation
  *
@@ -41,10 +45,11 @@ class JWT
     /**
      * @param string      $jwt    The JWT
      * @param string|null $key    The secret key
+     * @param bool $verify 是否验证
      *
      * @return array The JWT's payload as a PHP array
      */
-    public static function decode($jwt, $key = null)
+    public static function decode($jwt, $key = null, $verify = true)
     {
         $tks = explode('.', $jwt);
         if (count($tks) != 3) {
@@ -57,24 +62,26 @@ class JWT
         if (null === ($payload = JWT::jsonDecode(JWT::urlsafeB64Decode($payloadb64)))) {
             throw new UnexpectedValueException('Invalid segment encoding', 1);
         }
-        $sig = JWT::urlsafeB64Decode($cryptob64);
         if (empty($header['alg'])) {
             throw new DomainException('Empty algorithm', 1);
         }
+        $sig = JWT::urlsafeB64Decode($cryptob64);
         if ($sig != JWT::sign("$headb64.$payloadb64", $key, $header['alg'])) {
             throw new UnexpectedValueException('Signature verification failed', 2);
         }
-        // 签发时间大于当前服务器时间验证失败
-        if (isset($payload['iat']) && $payload['iat'] > time()) {
-            throw new UnexpectedValueException('Token iat is not valid before: ' . date(DateTime::ISO8601, $payload['iat']), 3);
-        }
-        // 过期时间小宇当前服务器时间验证失败
-        if (isset($payload['exp']) && $payload['exp'] < time()) {
-            throw new UnexpectedValueException('Token exp is not valid since: ' . date(DateTime::ISO8601, $payload['exp']), 4);
-        }
-        // 该nbf时间之前不接收处理该Token
-        if (isset($payload['nbf']) && $payload['nbf'] > time()) {
-            throw new UnexpectedValueException('Token nbf is not valid before: ' . date(DateTime::ISO8601, $payload['nbf']), 5);
+        if ($verify) {
+            // 签发时间大于当前服务器时间验证失败
+            if (isset($payload['iat']) && $payload['iat'] > time()) {
+                throw new UnexpectedValueException('Token iat is not valid before: ' . date(DateTime::ISO8601, $payload['iat']), 3);
+            }
+            // 过期时间小宇当前服务器时间验证失败
+            if (isset($payload['exp']) && $payload['exp'] < time()) {
+                throw new UnexpectedValueException('Token exp is not valid since: ' . date(DateTime::ISO8601, $payload['exp']), 4);
+            }
+            // 该nbf时间之前不接收处理该Token
+            if (isset($payload['nbf']) && $payload['nbf'] > time()) {
+                throw new UnexpectedValueException('Token nbf is not valid before: ' . date(DateTime::ISO8601, $payload['nbf']), 5);
+            }
         }
         return $payload;
     }
